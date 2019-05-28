@@ -1,0 +1,13 @@
+defaults:
+  menu_cmd: rofi -dmenu
+  terminal: alacritty --class floating -e "%s"
+
+tree:
+  - name: Check e-mail
+    items:
+      - name: me@cfcosta.com
+        cmd: neomutt -F ~/.muttrc ~/.mutt/accounts/me@cfcosta.com.muttrc
+      - name: Teste
+        items:
+          - name: Teste 2
+            cmd: echo "foo"
