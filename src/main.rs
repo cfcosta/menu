@@ -27,28 +27,39 @@ pub struct TreeItem {
   items: Vec<TreeItem>
 }
 
-pub fn walk_node(node: TreeItem, prefix: String) -> Vec<TreeItem> {
-    let name = if prefix == "" {
-        node.name
-    } else {
-        format!("{} -> {}", prefix, node.name)
-    };
+#[derive(Debug, PartialEq, Clone)]
+pub struct TreeList;
+impl TreeList {
+    pub fn recursive_select(&self, config: &Config, items: Vec<TreeItem>) -> Result<String, Box<Error>> {
+        let mut map: HashMap<String, TreeItem> = HashMap::new();
 
-    match node.cmd {
-        Some(cmd) => vec![TreeItem { name: name, cmd: Some(cmd), items: vec![] }],
-        None => node.items.iter().flat_map(|item| walk_node(item.clone(), name.clone()) ).collect::<Vec<TreeItem>>()
+        for item in items.clone().iter() {
+            map.insert(item.name.clone(), item.clone());
+        }
+
+        let mut command = Command::new("bash")
+            .args(&["-c", &config.defaults.menu_cmd])
+            .stdin(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
+
+        if let Some(ref mut stdin) = command.stdin {
+            for (k,_) in map.iter() {
+                writeln!(stdin, "{}", k)?;
+            }
+        }
+
+        let stdout = command.wait_with_output()?.stdout;
+        let output = String::from(str::from_utf8(&stdout)?.trim());
+
+        let item = map.get(&output).expect("Nothing (or an invalid item) was selected.");
+
+        match &item.cmd {
+            Some(cmd) => Ok(cmd.clone()),
+            None => self.recursive_select(&config, item.clone().items)
+        }
     }
-}
-
-pub fn tree_to_map(tree: Vec<TreeItem>) -> HashMap<String, TreeItem> {
-    let mut res = HashMap::new();
-
-    for item in tree.iter().flat_map(|item| walk_node(item.clone(), "".into())) {
-        let new_item = item.clone();
-        res.insert(item.name, new_item);
-    }
-
-    res
 }
 
 fn main() -> Result<(), Box<Error>> {
@@ -63,35 +74,11 @@ fn main() -> Result<(), Box<Error>> {
         .filter(|path| path.is_file())
         .filter_map(|path| fs::read_to_string(path).ok())
         .filter_map(|body| serde_yaml::from_str::<Vec<TreeItem>>(&body).ok())
-        .flat_map(|nodes|
-             nodes
-             .iter()
-             .flat_map(|tree| walk_node(tree.clone(), String::new()))
-             .collect::<Vec<TreeItem>>()
-         )
-        .collect();
+        .flatten()
+        .collect::<Vec<TreeItem>>();
 
-    let tree = tree_to_map(items);
-
-    let mut command = Command::new("bash")
-      .args(&["-c", &config.defaults.menu_cmd])
-      .stdin(Stdio::piped())
-      .stderr(Stdio::piped())
-      .stdout(Stdio::piped())
-      .spawn()?;
-
-    if let Some(ref mut stdin) = command.stdin {
-        for (k,_) in tree.iter() {
-            writeln!(stdin, "{}", k)?;
-        }
-    }
-
-    let stdout = command.wait_with_output()?.stdout;
-    let output = String::from(str::from_utf8(&stdout)?.trim());
-
-    let selected = tree.get(&output).unwrap();
-
-    println!("{}", selected.cmd.clone().unwrap());
+    let tree = TreeList {};
+    println!("{}", tree.recursive_select(&config, items)?);
 
     Ok(())
 }
